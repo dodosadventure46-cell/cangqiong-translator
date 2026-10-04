@@ -21,13 +21,18 @@ import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.ArrayAdapter
+import android.widget.Spinner
+import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.google.android.material.materialswitch.MaterialSwitch
+import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.*
 
 class BubbleService : Service() {
@@ -45,9 +50,10 @@ class BubbleService : Service() {
     private lateinit var menuParams: WindowManager.LayoutParams
 
     private val overlay by lazy { OverlayManager(this) }
-    private val translator by lazy { Translator() }
+    private val translator by lazy { MyTranslator() }
     private val recognizer by lazy {
-        TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
+        // Pakai Latin: bisa baca Inggris, Indonesia, dll.
+        TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     }
 
     private var projection: MediaProjection? = null
@@ -56,6 +62,14 @@ class BubbleService : Service() {
     private var captureJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var lastHash = 0
+
+    private val langLabels = arrayOf("Indonesia", "Inggris", "Arab")
+    private val langCodes = arrayOf(
+        TranslateLanguage.INDONESIAN,
+        TranslateLanguage.ENGLISH,
+        TranslateLanguage.ARABIC
+    )
+    private var selectedLang = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -171,16 +185,42 @@ class BubbleService : Service() {
                 intArrayOf(android.R.attr.state_checked),
                 intArrayOf(-android.R.attr.state_checked)
             )
-            val trackColors = ColorStateList(states, intArrayOf(
+            switch.trackTintList = ColorStateList(states, intArrayOf(
                 Color.parseColor("#39FF14"),
                 Color.parseColor("#555555")
             ))
-            val thumbColors = ColorStateList(states, intArrayOf(
+            switch.thumbTintList = ColorStateList(states, intArrayOf(
                 Color.parseColor("#39FF14"),
                 Color.parseColor("#AAAAAA")
             ))
-            switch.trackTintList = trackColors
-            switch.thumbTintList = thumbColors
+
+            val spinner = view.findViewById<Spinner>(R.id.spinnerLang)
+            val adapter = object : ArrayAdapter<String>(
+                themed(), R.layout.item_lang, langLabels
+            ) {
+                override fun getView(pos: Int, convertView: View?, parent: ViewGroup): View {
+                    val v = super.getView(pos, convertView, parent) as TextView
+                    v.setTextColor(Color.WHITE)
+                    return v
+                }
+                override fun getDropDownView(pos: Int, convertView: View?, parent: ViewGroup): View {
+                    val v = super.getDropDownView(pos, convertView, parent) as TextView
+                    v.setTextColor(Color.WHITE)
+                    v.setBackgroundColor(Color.parseColor("#1E1E24"))
+                    return v
+                }
+            }
+            spinner.adapter = adapter
+            spinner.setSelection(selectedLang)
+
+            spinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                    selectedLang = pos
+                    translator.setTarget(langCodes[pos])
+                    scope.launch { translator.prepare() }
+                }
+                override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
+            }
 
             switch.setOnCheckedChangeListener { _, checked ->
                 if (checked) {
@@ -235,6 +275,7 @@ class BubbleService : Service() {
             imageReader!!.surface, null, null
         )
 
+        translator.setTarget(langCodes[selectedLang])
         scope.launch { translator.prepare() }
         captureJob = scope.launch {
             while (isActive) {
