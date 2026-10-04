@@ -15,11 +15,13 @@ import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
 import android.util.DisplayMetrics
+import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.mlkit.vision.common.InputImage
@@ -71,101 +73,115 @@ class BubbleService : Service() {
         return START_STICKY
     }
 
+    private fun themed(): Context = ContextThemeWrapper(this, R.style.Theme_Cangqiong)
+
     private fun showBubble() {
-        val view = LayoutInflater.from(this).inflate(R.layout.bubble, null)
-        bubbleParams = WindowManager.LayoutParams(
-            140, 140,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = 40; y = 400
-        }
-
-        var dx = 0f; var dy = 0f
-        var downX = 0f; var downY = 0f
-        var moved = false
-
-        view.setOnTouchListener { _, e ->
-            when (e.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    dx = e.rawX - bubbleParams.x
-                    dy = e.rawY - bubbleParams.y
-                    downX = e.rawX; downY = e.rawY
-                    moved = false
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    bubbleParams.x = (e.rawX - dx).toInt()
-                    bubbleParams.y = (e.rawY - dy).toInt()
-                    wm.updateViewLayout(view, bubbleParams)
-                    if (Math.abs(e.rawX - downX) > 15 || Math.abs(e.rawY - downY) > 15) moved = true
-                    true
-                }
-                MotionEvent.ACTION_UP -> {
-                    if (!moved) toggleMenu()
-                    true
-                }
-                else -> false
+        try {
+            val view = LayoutInflater.from(themed()).inflate(R.layout.bubble, null)
+            bubbleParams = WindowManager.LayoutParams(
+                140, 140,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = 40; y = 400
             }
-        }
 
-        bubbleView = view
-        wm.addView(view, bubbleParams)
+            var dx = 0f; var dy = 0f
+            var downX = 0f; var downY = 0f
+            var moved = false
+
+            view.setOnTouchListener { _, e ->
+                when (e.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        dx = e.rawX - bubbleParams.x
+                        dy = e.rawY - bubbleParams.y
+                        downX = e.rawX; downY = e.rawY
+                        moved = false
+                        true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        bubbleParams.x = (e.rawX - dx).toInt()
+                        bubbleParams.y = (e.rawY - dy).toInt()
+                        wm.updateViewLayout(view, bubbleParams)
+                        if (Math.abs(e.rawX - downX) > 15 || Math.abs(e.rawY - downY) > 15) moved = true
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        if (!moved) toggleMenu()
+                        true
+                    }
+                    else -> false
+                }
+            }
+
+            bubbleView = view
+            wm.addView(view, bubbleParams)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Bubble error: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun toggleMenu() {
-        if (menuView != null) {
-            wm.removeView(menuView)
-            menuView = null
-            return
-        }
-        val view = LayoutInflater.from(this).inflate(R.layout.menu, null)
-        menuParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = bubbleParams.x + 160
-            y = bubbleParams.y
-        }
-
-        val switch = view.findViewById<MaterialSwitch>(R.id.switchTranslate)
-        switch.thumbTintList = ColorStateList.valueOf(Color.parseColor("#39FF14"))
-        switch.trackTintList = ColorStateList.valueOf(Color.parseColor("#39FF14"))
-
-        switch.setOnCheckedChangeListener { _, checked ->
-            if (checked) {
-                val i = Intent(this, MainActivity::class.java).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    putExtra("request_capture", true)
-                }
-                startActivity(i)
-            } else {
-                stopTranslate()
+        try {
+            if (menuView != null) {
+                wm.removeView(menuView)
+                menuView = null
+                return
             }
-        }
+            val view = LayoutInflater.from(themed()).inflate(R.layout.menu, null)
+            menuParams = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = bubbleParams.x + 160
+                y = bubbleParams.y
+            }
 
-        var dx = 0f; var dy = 0f
-        view.setOnTouchListener { _, e ->
-            if (e.action == MotionEvent.ACTION_DOWN) {
-                dx = e.rawX - menuParams.x
-                dy = e.rawY - menuParams.y
-                true
-            } else if (e.action == MotionEvent.ACTION_MOVE) {
-                menuParams.x = (e.rawX - dx).toInt()
-                menuParams.y = (e.rawY - dy).toInt()
-                wm.updateViewLayout(view, menuParams)
-                true
-            } else false
-        }
+            val switch = view.findViewById<MaterialSwitch>(R.id.switchTranslate)
+            try {
+                val neon = ColorStateList.valueOf(Color.parseColor("#39FF14"))
+                switch.thumbTintList = neon
+                switch.trackTintList = neon
+            } catch (_: Exception) {}
 
-        menuView = view
-        wm.addView(view, menuParams)
+            switch.setOnCheckedChangeListener { _, checked ->
+                if (checked) {
+                    val i = Intent(this, MainActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                        putExtra("request_capture", true)
+                    }
+                    startActivity(i)
+                } else {
+                    stopTranslate()
+                }
+            }
+
+            var dx = 0f; var dy = 0f
+            view.setOnTouchListener { _, e ->
+                if (e.action == MotionEvent.ACTION_DOWN) {
+                    dx = e.rawX - menuParams.x
+                    dy = e.rawY - menuParams.y
+                    true
+                } else if (e.action == MotionEvent.ACTION_MOVE) {
+                    menuParams.x = (e.rawX - dx).toInt()
+                    menuParams.y = (e.rawY - dy).toInt()
+                    wm.updateViewLayout(view, menuParams)
+                    true
+                } else false
+            }
+
+            menuView = view
+            wm.addView(view, menuParams)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Menu error: ${e.message}", Toast.LENGTH_LONG).show()
+            e.printStackTrace()
+        }
     }
 
     fun startTranslate(resultCode: Int, data: Intent) {
@@ -268,4 +284,3 @@ class BubbleService : Service() {
         super.onDestroy()
     }
 }
-
