@@ -23,12 +23,13 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Spinner
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
-import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -38,7 +39,7 @@ import kotlinx.coroutines.*
 class BubbleService : Service() {
 
     companion object {
-        private const val CHANNEL_ID = "cangqiong"
+        private const val CHANNEL_ID = "dodos"
         private const val NOTIF_ID = 1
         @Volatile var isRunning = false
     }
@@ -52,7 +53,6 @@ class BubbleService : Service() {
     private val overlay by lazy { OverlayManager(this) }
     private val translator by lazy { MyTranslator() }
     private val recognizer by lazy {
-        // Pakai Latin: bisa baca Inggris, Indonesia, dll.
         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     }
 
@@ -179,17 +179,17 @@ class BubbleService : Service() {
                 y = bubbleParams.y
             }
 
-            val switch = view.findViewById<MaterialSwitch>(R.id.switchTranslate)
+            val sw = view.findViewById<Switch>(R.id.switchTranslate)
 
             val states = arrayOf(
                 intArrayOf(android.R.attr.state_checked),
                 intArrayOf(-android.R.attr.state_checked)
             )
-            switch.trackTintList = ColorStateList(states, intArrayOf(
+            sw.trackTintList = ColorStateList(states, intArrayOf(
                 Color.parseColor("#39FF14"),
                 Color.parseColor("#555555")
             ))
-            switch.thumbTintList = ColorStateList(states, intArrayOf(
+            sw.thumbTintList = ColorStateList(states, intArrayOf(
                 Color.parseColor("#39FF14"),
                 Color.parseColor("#AAAAAA")
             ))
@@ -213,16 +213,16 @@ class BubbleService : Service() {
             spinner.adapter = adapter
             spinner.setSelection(selectedLang)
 
-            spinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-                override fun onItemSelected(p: android.widget.AdapterView<*>?, v: View?, pos: Int, id: Long) {
+            spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
                     selectedLang = pos
                     translator.setTarget(langCodes[pos])
                     scope.launch { translator.prepare() }
                 }
-                override fun onNothingSelected(p: android.widget.AdapterView<*>?) {}
+                override fun onNothingSelected(p: AdapterView<*>?) {}
             }
 
-            switch.setOnCheckedChangeListener { _, checked ->
+            sw.setOnCheckedChangeListener { _, checked ->
                 if (checked) {
                     val i = Intent(this, MainActivity::class.java).apply {
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
@@ -337,13 +337,13 @@ class BubbleService : Service() {
 
     private fun buildNotif(): Notification {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL_ID, "Cangqiong",
+            val ch = NotificationChannel(CHANNEL_ID, "DodosSuperTranslate",
                 NotificationManager.IMPORTANCE_LOW)
             (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
                 .createNotificationChannel(ch)
         }
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Cangqiong")
+            .setContentTitle("DodosSuperTranslate")
             .setContentText("Bubble aktif")
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setOngoing(true)

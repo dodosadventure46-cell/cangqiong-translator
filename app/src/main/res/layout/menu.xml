@@ -21,7 +21,7 @@
             android:textColor="#FFFFFF"
             android:textSize="16sp"/>
 
-        <com.google.android.material.materialswitch.MaterialSwitch
+        <Switch
             android:id="@+id/switchTranslate"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"/>
@@ -45,7 +45,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Terjemahkan ke"
+            android:text="Terjemahan ke"
             android:textColor="#CCCCCC"
             android:textSize="14sp"/>
 
