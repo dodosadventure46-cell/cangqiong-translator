@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.Cangqiong" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:statusBarColor">#0B0B0F</item>
+        <item name="android:windowBackground">#0B0B0F</item>
+    </style>
+</resources>
+
