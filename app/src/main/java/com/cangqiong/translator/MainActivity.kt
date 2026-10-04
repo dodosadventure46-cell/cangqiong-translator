@@ -1,111 +1,131 @@
 package com.cangqiong.translator
 
 import android.Manifest
-import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.projection.MediaProjectionManager
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import android.widget.Button
+import android.widget.EditText
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var btnStart: Button
-    private lateinit var mpm: MediaProjectionManager
+    private var player: MediaPlayer? = null
+    private lateinit var etUrl: EditText
+    private lateinit var tvStatus: TextView
 
-    private val captureLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-            val svc = Intent(this, BubbleService::class.java).apply {
-                action = "START_CAPTURE"
-                putExtra("code", result.resultCode)
-                putExtra("data", result.data)
-            }
-            startService(svc)
-            Toast.makeText(this, "Terjemahan aktif", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(this, "Izin rekam layar ditolak", Toast.LENGTH_SHORT).show()
+    private val pickAudio = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                contentResolver.takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: Exception) {}
+            playUri(uri, "Memori: ${uri.lastPathSegment}")
         }
+    }
+
+    private val permLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) pickAudio.launch(arrayOf("audio/*"))
+        else Toast.makeText(this, "Izin ditolak", Toast.LENGTH_SHORT).show()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-        btnStart = findViewById(R.id.btnStart)
-        mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        btnStart.setOnClickListener { onToggle() }
-        handleIntent(intent)
-    }
 
-    override fun onNewIntent(intent: Intent?) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        handleIntent(intent)
-    }
+        etUrl = findViewById(R.id.etUrl)
+        tvStatus = findViewById(R.id.tvStatus)
 
-    override fun onResume() {
-        super.onResume()
-        updateButtonText()
-    }
-
-    private fun updateButtonText() {
-        btnStart.text = if (BubbleService.isRunning) "Matikan Bubble" else "Aktifkan Bubble"
-    }
-
-    private fun onToggle() {
-        if (BubbleService.isRunning) {
-            stopService(Intent(this, BubbleService::class.java))
-            btnStart.postDelayed({ updateButtonText() }, 300)
-        } else {
-            startFlow()
+        findViewById<Button>(R.id.btnUrl).setOnClickListener {
+            val url = etUrl.text.toString().trim()
+            if (url.isEmpty()) {
+                Toast.makeText(this, "Isi link dulu", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            playUri(Uri.parse(url), "URL: $url")
         }
-    }
 
-    private fun handleIntent(intent: Intent?) {
-        if (intent?.getBooleanExtra("request_capture", false) == true) {
-            intent.removeExtra("request_capture")
-            captureLauncher.launch(mpm.createScreenCaptureIntent())
+        findViewById<Button>(R.id.btnLocal).setOnClickListener {
+            if (!hasAudioPermission()) requestAudioPermission()
+            else pickAudio.launch(arrayOf("audio/*"))
         }
-    }
 
-    private fun startFlow() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(this,
-                    arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
-                return
+        findViewById<Button>(R.id.btnPlay).setOnClickListener {
+            player?.let {
+                if (!it.isPlaying) it.start()
+                tvStatus.text = "Putar"
+            } ?: Toast.makeText(this, "Belum ada lagu", Toast.LENGTH_SHORT).show()
+        }
+
+        findViewById<Button>(R.id.btnPause).setOnClickListener {
+            player?.let {
+                if (it.isPlaying) it.pause()
+                tvStatus.text = "Jeda"
             }
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            Toast.makeText(this, "Izinkan 'Display over other apps'", Toast.LENGTH_LONG).show()
-            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:$packageName")))
-            return
+        findViewById<Button>(R.id.btnStop).setOnClickListener {
+            player?.let { it.stop(); it.release() }
+            player = null
+            tvStatus.text = "Stop"
         }
+    }
 
+    private fun playUri(uri: Uri, label: String) {
         try {
-            startForegroundService(Intent(this, BubbleService::class.java))
-            btnStart.postDelayed({ updateButtonText() }, 300)
+            player?.let { it.stop(); it.release() }
+            player = MediaPlayer().apply {
+                setDataSource(this@MainActivity, uri)
+                setOnPreparedListener {
+                    it.start()
+                    tvStatus.text = "Sedang diputar\n$label"
+                }
+                setOnErrorListener { _, what, extra ->
+                    Toast.makeText(this@MainActivity,
+                        "Error: $what / $extra", Toast.LENGTH_LONG).show()
+                    tvStatus.text = "Gagal memutar"
+                    true
+                }
+                prepareAsync()
+            }
+            tvStatus.text = "Memuat..."
         } catch (e: Exception) {
             Toast.makeText(this, "Gagal: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 101) startFlow()
+    private fun hasAudioPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO)
+                == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
+                == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun requestAudioPermission() {
+        val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            Manifest.permission.READ_MEDIA_AUDIO
+        else Manifest.permission.READ_EXTERNAL_STORAGE
+        permLauncher.launch(perm)
+    }
+
+    override fun onDestroy() {
+        player?.let { it.release() }
+        player = null
+        super.onDestroy()
     }
 }
