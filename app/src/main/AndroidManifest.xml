@@ -12,7 +12,8 @@
         android:label="@string/app_name"
         android:theme="@style/Theme.Cangqiong">
 
-        <activity android:name=".MainActivity" android:exported="true">
+        <activity android:name=".MainActivity" android:exported="true"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
@@ -21,7 +22,7 @@
 
         <service
             android:name=".BubbleService"
-            android:foregroundServiceType="specialUse"
+            android:foregroundServiceType="specialUse|mediaProjection"
             android:exported="false">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
@@ -29,3 +30,4 @@
         </service>
     </application>
 </manifest>
+

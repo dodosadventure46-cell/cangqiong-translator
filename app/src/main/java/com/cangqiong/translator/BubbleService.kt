@@ -3,6 +3,7 @@ package com.cangqiong.translator
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -34,8 +35,7 @@ class BubbleService : Service() {
     companion object {
         private const val CHANNEL_ID = "cangqiong"
         private const val NOTIF_ID = 1
-        var pendingResultCode: Int = -1
-        var pendingData: Intent? = null
+        @Volatile var isRunning = false
     }
 
     private lateinit var wm: WindowManager
@@ -62,18 +62,40 @@ class BubbleService : Service() {
     override fun onCreate() {
         super.onCreate()
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        startForeground(NOTIF_ID, buildNotif())
+        startFgSpecialUse()
         showBubble()
+        isRunning = true
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == "START_CAPTURE" && pendingData != null) {
-            startTranslate(pendingResultCode, pendingData!!)
+        if (intent?.action == "START_CAPTURE") {
+            val code = intent.getIntExtra("code", -1)
+            @Suppress("DEPRECATION")
+            val data = intent.getParcelableExtra<Intent>("data")
+            if (code != -1 && data != null) startTranslate(code, data)
         }
         return START_STICKY
     }
 
     private fun themed(): Context = ContextThemeWrapper(this, R.style.Theme_Cangqiong)
+
+    private fun startFgSpecialUse() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIF_ID, buildNotif(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(NOTIF_ID, buildNotif())
+        }
+    }
+
+    private fun promoteToMediaProjection() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                startForeground(NOTIF_ID, buildNotif(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            } catch (_: Exception) {}
+        }
+    }
 
     private fun showBubble() {
         try {
@@ -144,16 +166,28 @@ class BubbleService : Service() {
             }
 
             val switch = view.findViewById<MaterialSwitch>(R.id.switchTranslate)
-            try {
-                val neon = ColorStateList.valueOf(Color.parseColor("#39FF14"))
-                switch.thumbTintList = neon
-                switch.trackTintList = neon
-            } catch (_: Exception) {}
+
+            val states = arrayOf(
+                intArrayOf(android.R.attr.state_checked),
+                intArrayOf(-android.R.attr.state_checked)
+            )
+            val trackColors = ColorStateList(states, intArrayOf(
+                Color.parseColor("#39FF14"),
+                Color.parseColor("#555555")
+            ))
+            val thumbColors = ColorStateList(states, intArrayOf(
+                Color.parseColor("#39FF14"),
+                Color.parseColor("#AAAAAA")
+            ))
+            switch.trackTintList = trackColors
+            switch.thumbTintList = thumbColors
 
             switch.setOnCheckedChangeListener { _, checked ->
                 if (checked) {
                     val i = Intent(this, MainActivity::class.java).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                                or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                         putExtra("request_capture", true)
                     }
                     startActivity(i)
@@ -180,11 +214,11 @@ class BubbleService : Service() {
             wm.addView(view, menuParams)
         } catch (e: Exception) {
             Toast.makeText(this, "Menu error: ${e.message}", Toast.LENGTH_LONG).show()
-            e.printStackTrace()
         }
     }
 
     fun startTranslate(resultCode: Int, data: Intent) {
+        promoteToMediaProjection()
         val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         projection = mpm.getMediaProjection(resultCode, data)
         val metrics = DisplayMetrics()
@@ -257,6 +291,7 @@ class BubbleService : Service() {
         imageReader?.close(); imageReader = null
         projection?.stop(); projection = null
         overlay.clear()
+        startFgSpecialUse()
     }
 
     private fun buildNotif(): Notification {
@@ -281,6 +316,7 @@ class BubbleService : Service() {
         menuView?.let { runCatching { wm.removeView(it) } }
         translator.close()
         recognizer.close()
+        isRunning = false
         super.onDestroy()
     }
 }
