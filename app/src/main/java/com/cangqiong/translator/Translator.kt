@@ -10,7 +10,8 @@ import kotlin.coroutines.resume
 class MyTranslator {
 
     private var currentTarget: String = TranslateLanguage.INDONESIAN
-    private var client: Translator = build(TranslateLanguage.ENGLISH, currentTarget)
+    private var currentSource: String = TranslateLanguage.ENGLISH
+    private var client: Translator = build(currentSource, currentTarget)
 
     private fun build(source: String, target: String): Translator =
         Translation.getClient(
@@ -39,7 +40,14 @@ class MyTranslator {
         if (newTarget == currentTarget) return
         runCatching { client.close() }
         currentTarget = newTarget
-        client = build(TranslateLanguage.ENGLISH, newTarget)
+        client = build(currentSource, currentTarget)
+    }
+
+    fun setSource(code: String) {
+        if (code == currentSource) return
+        runCatching { client.close() }
+        currentSource = code
+        client = build(currentSource, currentTarget)
     }
 
     fun close() = runCatching { client.close() }

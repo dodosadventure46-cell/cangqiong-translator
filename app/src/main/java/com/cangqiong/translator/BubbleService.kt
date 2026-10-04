@@ -30,11 +30,19 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import com.google.android.gms.tasks.Task
 import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.TextRecognizer
+import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
+import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
+import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.*
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlin.coroutines.suspendCoroutine
 
 class BubbleService : Service() {
 
@@ -52,8 +60,15 @@ class BubbleService : Service() {
 
     private val overlay by lazy { OverlayManager(this) }
     private val translator by lazy { MyTranslator() }
-    private val recognizer by lazy {
-        TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+
+    // 4 recognizer: Latin, Chinese, Japanese, Korean
+    private val recognizers: List<Pair<String, TextRecognizer>> by lazy {
+        listOf(
+            "en" to TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS),
+            "zh" to TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build()),
+            "ja" to TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build()),
+            "ko" to TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
+        )
     }
 
     private var projection: MediaProjection? = null
@@ -63,13 +78,15 @@ class BubbleService : Service() {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var lastHash = 0
 
+    // state
+    private var switchOn = false
+    private var selectedLang = 0
     private val langLabels = arrayOf("Indonesia", "Inggris", "Arab")
     private val langCodes = arrayOf(
         TranslateLanguage.INDONESIAN,
         TranslateLanguage.ENGLISH,
         TranslateLanguage.ARABIC
     )
-    private var selectedLang = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -86,7 +103,10 @@ class BubbleService : Service() {
             val code = intent.getIntExtra("code", -1)
             @Suppress("DEPRECATION")
             val data = intent.getParcelableExtra<Intent>("data")
-            if (code != -1 && data != null) startTranslate(code, data)
+            if (code != -1 && data != null) {
+                switchOn = true
+                startTranslate(code, data)
+            }
         }
         return START_STICKY
     }
@@ -194,6 +214,23 @@ class BubbleService : Service() {
                 Color.parseColor("#AAAAAA")
             ))
 
+            // --- PENTING: restore state dulu, baru pasang listener ---
+            sw.isChecked = switchOn
+            sw.setOnCheckedChangeListener { _, checked ->
+                switchOn = checked
+                if (checked) {
+                    val i = Intent(this, MainActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                                or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                        putExtra("request_capture", true)
+                    }
+                    startActivity(i)
+                } else {
+                    stopTranslate()
+                }
+            }
+
             val spinner = view.findViewById<Spinner>(R.id.spinnerLang)
             val adapter = object : ArrayAdapter<String>(
                 themed(), R.layout.item_lang, langLabels
@@ -212,7 +249,6 @@ class BubbleService : Service() {
             }
             spinner.adapter = adapter
             spinner.setSelection(selectedLang)
-
             spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
                     selectedLang = pos
@@ -220,20 +256,6 @@ class BubbleService : Service() {
                     scope.launch { translator.prepare() }
                 }
                 override fun onNothingSelected(p: AdapterView<*>?) {}
-            }
-
-            sw.setOnCheckedChangeListener { _, checked ->
-                if (checked) {
-                    val i = Intent(this, MainActivity::class.java).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                                or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                                or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                        putExtra("request_capture", true)
-                    }
-                    startActivity(i)
-                } else {
-                    stopTranslate()
-                }
             }
 
             var dx = 0f; var dy = 0f
@@ -279,7 +301,7 @@ class BubbleService : Service() {
         scope.launch { translator.prepare() }
         captureJob = scope.launch {
             while (isActive) {
-                delay(2000)
+                delay(2500)
                 captureOnce()
             }
         }
@@ -305,20 +327,32 @@ class BubbleService : Service() {
             if (h == lastHash) return
             lastHash = h
 
-            val input = InputImage.fromBitmap(cropped, 0)
-            recognizer.process(input).addOnSuccessListener { result ->
+            scope.launch {
+                val input = InputImage.fromBitmap(cropped, 0)
+                // jalankan 4 OCR paralel, ambil yang paling banyak blok
+                val results = recognizers.map { (code, rec) ->
+                    code to runCatching { rec.process(input).await() }.getOrNull()
+                }
+                val best = results.filter { it.second != null }
+                    .maxByOrNull { it.second!!.textBlocks.size } ?: return@launch
+
+                val sourceLang = best.first
+                val result = best.second!!
+
                 val blocks = result.textBlocks.mapNotNull { b ->
                     val rect = b.boundingBox ?: return@mapNotNull null
                     val text = b.text.replace("\n", " ").trim()
                     if (text.length < 2) return@mapNotNull null
                     TranslatedBlock(text, rect)
                 }
-                scope.launch {
-                    val out = blocks.map { blk ->
-                        TranslatedBlock(translator.translate(blk.text), blk.rect)
-                    }
-                    withContext(Dispatchers.Main) { overlay.show(out) }
+                if (blocks.isEmpty()) return@launch
+
+                translator.setSource(sourceLang)
+
+                val out = blocks.map { blk ->
+                    TranslatedBlock(translator.translate(blk.text), blk.rect)
                 }
+                withContext(Dispatchers.Main) { overlay.show(out) }
             }
         } catch (_: Exception) {
         } finally {
@@ -327,6 +361,7 @@ class BubbleService : Service() {
     }
 
     private fun stopTranslate() {
+        switchOn = false
         captureJob?.cancel()
         virtualDisplay?.release(); virtualDisplay = null
         imageReader?.close(); imageReader = null
@@ -356,8 +391,14 @@ class BubbleService : Service() {
         bubbleView?.let { runCatching { wm.removeView(it) } }
         menuView?.let { runCatching { wm.removeView(it) } }
         translator.close()
-        recognizer.close()
+        recognizers.forEach { runCatching { it.second.close() } }
         isRunning = false
         super.onDestroy()
     }
+}
+
+// helper: Task -> suspend
+suspend fun <T> Task<T>.await(): T = suspendCoroutine { cont ->
+    addOnSuccessListener { cont.resume(it) }
+    addOnFailureListener { cont.resumeWithException(it) }
 }
