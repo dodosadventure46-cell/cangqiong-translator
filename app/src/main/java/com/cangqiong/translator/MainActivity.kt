@@ -27,16 +27,18 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) {
             try {
                 contentResolver.takePersistableUriPermission(
-                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+            }
             playUri(uri, "Memori: ${uri.lastPathSegment}")
         }
     }
 
     private val permLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { granted ->
+    ) { granted: Boolean ->
         if (granted) pickAudio.launch(arrayOf("audio/*"))
         else Toast.makeText(this, "Izin ditolak", Toast.LENGTH_SHORT).show()
     }
@@ -77,7 +79,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.btnStop).setOnClickListener {
-            player?.let { it.stop(); it.release() }
+            player?.let {
+                try {
+                    if (it.isPlaying) it.stop()
+                } catch (_: Exception) {
+                }
+                it.release()
+            }
             player = null
             tvStatus.text = "Stop"
         }
@@ -85,16 +93,25 @@ class MainActivity : AppCompatActivity() {
 
     private fun playUri(uri: Uri, label: String) {
         try {
-            player?.let { it.stop(); it.release() }
+            player?.let {
+                try {
+                    it.stop()
+                } catch (_: Exception) {
+                }
+                it.release()
+            }
             player = MediaPlayer().apply {
                 setDataSource(this@MainActivity, uri)
-                setOnPreparedListener {
-                    it.start()
+                setOnPreparedListener { mp ->
+                    mp.start()
                     tvStatus.text = "Sedang diputar\n$label"
                 }
                 setOnErrorListener { _, what, extra ->
-                    Toast.makeText(this@MainActivity,
-                        "Error: $what / $extra", Toast.LENGTH_LONG).show()
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Error: $what / $extra",
+                        Toast.LENGTH_LONG
+                    ).show()
                     tvStatus.text = "Gagal memutar"
                     true
                 }
@@ -108,23 +125,29 @@ class MainActivity : AppCompatActivity() {
 
     private fun hasAudioPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO)
-                == PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_MEDIA_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
         } else {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
-                == PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            ) == PackageManager.PERMISSION_GRANTED
         }
     }
 
     private fun requestAudioPermission() {
-        val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+        val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Manifest.permission.READ_MEDIA_AUDIO
-        else Manifest.permission.READ_EXTERNAL_STORAGE
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
         permLauncher.launch(perm)
     }
 
     override fun onDestroy() {
-        player?.let { it.release() }
+        player?.let { try { it.release() } catch (_: Exception) {} }
         player = null
         super.onDestroy()
     }
